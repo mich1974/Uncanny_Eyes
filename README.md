@@ -1,3 +1,5 @@
+This version was forked from Adafruit's repository, and I've updated it so each connected eye will move and blink independently of one another.
+
 # Uncanny_Eyes
 
 'Uncanny eyes' for Adafruit 1.5" OLED (product #1431) or 1.44" TFT LCD (#2088).  Works on PJRC Teensy 3.x and on Adafruit M0 and M4 boards (Feather, Metro, etc.).  This code uses features specific to these boards and WILL NOT work on normal Arduino or other boards!
