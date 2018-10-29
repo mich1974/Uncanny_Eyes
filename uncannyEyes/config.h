@@ -11,7 +11,7 @@
 #ifdef ADAFRUIT_HALLOWING // Hallowing, with one eye, does this by default
   #define SYMMETRICAL_EYELID
 #else                     // Otherwise your choice, standard is asymmetrical
-  //#define SYMMETRICAL_EYELID
+  #define SYMMETRICAL_EYELID
 #endif
 
 // Enable ONE of these #includes -- HUGE graphics tables for various eyes:
@@ -38,8 +38,9 @@ eyeInfo_t eyeInfo[] = {
 #ifdef ADAFRUIT_HALLOWING
   { 39, -1, 2 }, // SINGLE EYE display-select and wink pins, rotate 180
 #else
-  {  9, 0, 0 }, // LEFT EYE display-select and wink pins, no rotation
-  { 10, 2, 0 }, // RIGHT EYE display-select and wink pins, no rotation
+ // LEFT EYE display-select and wink pins, no rotation
+  { 10, 2, 2 }, // RIGHT EYE display-select and wink pins, no rotation
+  { 12, 2, 2 }
 #endif
 };
 
@@ -53,10 +54,10 @@ eyeInfo_t eyeInfo[] = {
   #define BACKLIGHT_MAX   128
 #else
   // Enable ONE of these #includes to specify the display type being used
-  #include <Adafruit_SSD1351.h>  // OLED display library -OR-
-  //#include <Adafruit_ST7735.h> // TFT display library (enable one only)
+  //#include <Adafruit_SSD1351.h>  // OLED display library -OR-
+  #include <Adafruit_ST7735.h> // TFT display library (enable one only)
   #define DISPLAY_DC        7    // Data/command pin for ALL displays
-  #define DISPLAY_RESET     8    // Reset pin for ALL displays
+  #define DISPLAY_RESET     11    // Reset pin for ALL displays
 #endif
 
 #if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_)
@@ -107,3 +108,9 @@ eyeInfo_t eyeInfo[] = {
 #if !defined(IRIS_MAX)
   #define IRIS_MAX      720 // Iris size (0-1023) in darkest light
 #endif
+
+
+
+
+
+

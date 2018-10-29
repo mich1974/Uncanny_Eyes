@@ -45,13 +45,24 @@ typedef struct {
   uint8_t  state;       // NOBLINK/ENBLINK/DEBLINK
   uint32_t duration;    // Duration of blink state (micros)
   uint32_t startTime;   // Time (micros) of last state change
+  uint32_t timeOfLastBlink = 0L, timeToNextBlink = 0L;
 } eyeBlink;
+
+typedef struct {
+  boolean  eyeInMotion      = false;
+  int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
+  uint32_t eyeMoveStartTime = 0L;
+  int32_t  eyeMoveDuration  = 0L;
+  int16_t         eyeX, eyeY;
+  uint8_t uThreshold = 128;
+} eyeMove;
 
 #define NUM_EYES (sizeof eyeInfo / sizeof eyeInfo[0]) // config.h pin list
 
 struct {                // One-per-eye structure
   displayType *display; // -> OLED/TFT object
   eyeBlink     blink;   // Current blink/wink state
+  eyeMove      move;
 } eye[NUM_EYES];
 
 #ifdef ARDUINO_ARCH_SAMD
@@ -365,15 +376,10 @@ const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
   245,245,246,246,247,248,248,249,249,250,250,251,251,251,252,252,   // o
   252,253,253,253,254,254,254,254,254,255,255,255,255,255,255,255 }; // n
 
-#ifdef AUTOBLINK
-uint32_t timeOfLastBlink = 0L, timeToNextBlink = 0L;
-#endif
-
 void frame( // Process motion for a single frame of left or right eye
   uint16_t        iScale) {     // Iris scale (0-1023) passed in
   static uint32_t frames   = 0; // Used in frame rate calculation
-  static uint8_t  eyeIndex = 0; // eye[] array counter
-  int16_t         eyeX, eyeY;
+  
   uint32_t        t = micros(); // Time at start of function
 
   if(!(++frames & 255)) { // Every 256 frames...
@@ -381,133 +387,85 @@ void frame( // Process motion for a single frame of left or right eye
     if(elapsed) Serial.println(frames / elapsed); // Print FPS
   }
 
-  if(++eyeIndex >= NUM_EYES) eyeIndex = 0; // Cycle through eyes, 1 per call
-
-  // X/Y movement
-
-#if defined(JOYSTICK_X_PIN) && (JOYSTICK_X_PIN >= 0) && \
-    defined(JOYSTICK_Y_PIN) && (JOYSTICK_Y_PIN >= 0)
-
-  // Read X/Y from joystick, constrain to circle
-  int16_t dx, dy;
-  int32_t d;
-  eyeX = analogRead(JOYSTICK_X_PIN); // Raw (unclipped) X/Y reading
-  eyeY = analogRead(JOYSTICK_Y_PIN);
-#ifdef JOYSTICK_X_FLIP
-  eyeX = 1023 - eyeX;
-#endif
-#ifdef JOYSTICK_Y_FLIP
-  eyeY = 1023 - eyeY;
-#endif
-  dx = (eyeX * 2) - 1023; // A/D exact center is at 511.5.  Scale coords
-  dy = (eyeY * 2) - 1023; // X2 so range is -1023 to +1023 w/center at 0.
-  if((d = (dx * dx + dy * dy)) > (1023 * 1023)) { // Outside circle
-    d    = (int32_t)sqrt((float)d);               // Distance from center
-    eyeX = ((dx * 1023 / d) + 1023) / 2;          // Clip to circle edge,
-    eyeY = ((dy * 1023 / d) + 1023) / 2;          // scale back to 0-1023
-  }
-
-#else // Autonomous X/Y eye motion
-      // Periodically initiates motion to a new random point, random speed,
-      // holds there for random period until next motion.
-
-  static boolean  eyeInMotion      = false;
-  static int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
-  static uint32_t eyeMoveStartTime = 0L;
-  static int32_t  eyeMoveDuration  = 0L;
-
-  int32_t dt = t - eyeMoveStartTime;      // uS elapsed since last eye event
-  if(eyeInMotion) {                       // Currently moving?
-    if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
-      eyeInMotion      = false;           // Stop moving
-      eyeMoveDuration  = random(3000000); // 0-3 sec stop
-      eyeMoveStartTime = t;               // Save initial time of stop
-      eyeX = eyeOldX = eyeNewX;           // Save position
-      eyeY = eyeOldY = eyeNewY;
-    } else { // Move time's not yet fully elapsed -- interpolate position
-      int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
-      eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
-      eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
+  for(uint8_t e=0; e<NUM_EYES; e++) {
+    // X/Y movement
+    // Autonomous X/Y eye motion
+    // Periodically initiates motion to a new random point, random speed,
+    // holds there for random period until next motion.
+    int32_t dt = t - eye[e].move.eyeMoveStartTime;      // uS elapsed since last eye event
+    if(eye[e].move.eyeInMotion) {                       // Currently moving?
+      if(dt >= eye[e].move.eyeMoveDuration) {           // Time up?  Destination reached.
+        eye[e].move.eyeInMotion      = false;           // Stop moving
+        eye[e].move.eyeMoveDuration  = random(3000000); // 0-3 sec stop
+        eye[e].move.eyeMoveStartTime = t;               // Save initial time of stop
+        eye[e].move.eyeX = eye[e].move.eyeOldX = eye[e].move.eyeNewX;           // Save position
+        eye[e].move.eyeY = eye[e].move.eyeOldY = eye[e].move.eyeNewY;
+      } else { // Move time's not yet fully elapsed -- interpolate position
+        int16_t easeVal = ease[255 * dt / eye[e].move.eyeMoveDuration] + 1;   // Ease curve
+        eye[e].move.eyeX = eye[e].move.eyeOldX + (((eye[e].move.eyeNewX - eye[e].move.eyeOldX) * easeVal) / 256); // Interp X
+        eye[e].move.eyeY = eye[e].move.eyeOldY + (((eye[e].move.eyeNewY - eye[e].move.eyeOldY) * easeVal) / 256); // and Y
+      }
+    } else {                                // Eye stopped
+      eye[e].move.eyeX = eye[e].move.eyeOldX;
+      eye[e].move.eyeY = eye[e].move.eyeOldY;
+      if(dt > eye[e].move.eyeMoveDuration) {            // Time up?  Begin new move.
+        int16_t  dx, dy;
+        uint32_t d;
+        do {                                // Pick new dest in circle
+          eye[e].move.eyeNewX = random(1024);
+          eye[e].move.eyeNewY = random(1024);
+          dx      = (eye[e].move.eyeNewX * 2) - 1023;
+          dy      = (eye[e].move.eyeNewY * 2) - 1023;
+        } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
+        eye[e].move.eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
+        eye[e].move.eyeMoveStartTime = t;               // Save initial time of move
+        eye[e].move.eyeInMotion      = true;            // Start move on next frame
+      }
     }
-  } else {                                // Eye stopped
-    eyeX = eyeOldX;
-    eyeY = eyeOldY;
-    if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
-      int16_t  dx, dy;
-      uint32_t d;
-      do {                                // Pick new dest in circle
-        eyeNewX = random(1024);
-        eyeNewY = random(1024);
-        dx      = (eyeNewX * 2) - 1023;
-        dy      = (eyeNewY * 2) - 1023;
-      } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
-      eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
-      eyeMoveStartTime = t;               // Save initial time of move
-      eyeInMotion      = true;            // Start move on next frame
-    }
-  }
 
-#endif // JOYSTICK_X_PIN etc.
 
   // Blinking
 
 #ifdef AUTOBLINK
   // Similar to the autonomous eye movement above -- blink start times
   // and durations are random (within ranges).
-  if((t - timeOfLastBlink) >= timeToNextBlink) { // Start new blink?
-    timeOfLastBlink = t;
-    uint32_t blinkDuration = random(36000, 72000); // ~1/28 - ~1/14 sec
+  if((t - eye[e].blink.timeOfLastBlink) >= eye[e].blink.timeToNextBlink) { // Start new blink?
+    eye[e].blink.timeOfLastBlink = t;
+    eye[e].blink.duration = random(36000, 72000); // ~1/28 - ~1/14 sec
     // Set up durations for both eyes (if not already winking)
-    for(uint8_t e=0; e<NUM_EYES; e++) {
+//    for(uint8_t e=0; e<NUM_EYES; e++) {
       if(eye[e].blink.state == NOBLINK) {
         eye[e].blink.state     = ENBLINK;
         eye[e].blink.startTime = t;
-        eye[e].blink.duration  = blinkDuration;
       }
-    }
-    timeToNextBlink = blinkDuration * 3 + random(4000000);
+//    }
+    eye[e].blink.timeToNextBlink = eye[e].blink.duration * 3 + random(8000000);
   }
 #endif
 
-  if(eye[eyeIndex].blink.state) { // Eye currently blinking?
+  if(eye[e].blink.state) { // Eye currently blinking?
     // Check if current blink state time has elapsed
-    if((t - eye[eyeIndex].blink.startTime) >= eye[eyeIndex].blink.duration) {
+    if((t - eye[e].blink.startTime) >= eye[e].blink.duration) {
       // Yes -- increment blink state, unless...
-      if((eye[eyeIndex].blink.state == ENBLINK) && ( // Enblinking and...
-#if defined(BLINK_PIN) && (BLINK_PIN >= 0)
-        (digitalRead(BLINK_PIN) == LOW) ||           // blink or wink held...
-#endif
-        ((eyeInfo[eyeIndex].wink >= 0) &&
-         digitalRead(eyeInfo[eyeIndex].wink) == LOW) )) {
+      if((eye[e].blink.state == ENBLINK) && ( // Enblinking and...
+        ((eyeInfo[e].wink >= 0) &&
+         digitalRead(eyeInfo[e].wink) == LOW) )) {
         // Don't advance state yet -- eye is held closed instead
       } else { // No buttons, or other state...
-        if(++eye[eyeIndex].blink.state > DEBLINK) { // Deblinking finished?
-          eye[eyeIndex].blink.state = NOBLINK;      // No longer blinking
+        if(++eye[e].blink.state > DEBLINK) { // Deblinking finished?
+          eye[e].blink.state = NOBLINK;      // No longer blinking
         } else { // Advancing from ENBLINK to DEBLINK mode
-          eye[eyeIndex].blink.duration *= 2; // DEBLINK is 1/2 ENBLINK speed
-          eye[eyeIndex].blink.startTime = t;
+          eye[e].blink.duration *= 2; // DEBLINK is 1/2 ENBLINK speed
+          eye[e].blink.startTime = t;
         }
       }
     }
   } else { // Not currently blinking...check buttons!
-#if defined(BLINK_PIN) && (BLINK_PIN >= 0)
-    if(digitalRead(BLINK_PIN) == LOW) {
-      // Manually-initiated blinks have random durations like auto-blink
-      uint32_t blinkDuration = random(36000, 72000);
-      for(uint8_t e=0; e<NUM_EYES; e++) {
-        if(eye[e].blink.state == NOBLINK) {
-          eye[e].blink.state     = ENBLINK;
-          eye[e].blink.startTime = t;
-          eye[e].blink.duration  = blinkDuration;
-        }
-      }
-    } else
-#endif
-    if((eyeInfo[eyeIndex].wink >= 0) &&
-       (digitalRead(eyeInfo[eyeIndex].wink) == LOW)) { // Wink!
-      eye[eyeIndex].blink.state     = ENBLINK;
-      eye[eyeIndex].blink.startTime = t;
-      eye[eyeIndex].blink.duration  = random(45000, 90000);
+    if((eyeInfo[e].wink >= 0) &&
+       (digitalRead(eyeInfo[e].wink) == LOW)) { // Wink!
+      eye[e].blink.state     = ENBLINK;
+      eye[e].blink.startTime = t;
+      eye[e].blink.duration  = random(45000, 90000);
     }
   }
 
@@ -518,54 +476,54 @@ void frame( // Process motion for a single frame of left or right eye
            (1024 - (iScale * (IRIS_MAP_HEIGHT - 1) / IRIS_MAP_HEIGHT));
 
   // Scale eye X/Y positions (0-1023) to pixel units used by drawEye()
-  eyeX = map(eyeX, 0, 1023, 0, SCLERA_WIDTH  - 128);
-  eyeY = map(eyeY, 0, 1023, 0, SCLERA_HEIGHT - 128);
-  if(eyeIndex == 1) eyeX = (SCLERA_WIDTH - 128) - eyeX; // Mirrored display
+  eye[e].move.eyeX = map(eye[e].move.eyeX, 0, 1023, 0, SCLERA_WIDTH  - 128);
+  eye[e].move.eyeY = map(eye[e].move.eyeY, 0, 1023, 0, SCLERA_HEIGHT - 128);
+  if(e == 1) eye[e].move.eyeX = (SCLERA_WIDTH - 128) - eye[e].move.eyeX; // Mirrored display
 
   // Horizontal position is offset so that eyes are very slightly crossed
   // to appear fixated (converged) at a conversational distance.  Number
   // here was extracted from my posterior and not mathematically based.
   // I suppose one could get all clever with a range sensor, but for now...
-  if(NUM_EYES > 1) eyeX += 4;
-  if(eyeX > (SCLERA_WIDTH - 128)) eyeX = (SCLERA_WIDTH - 128);
+  if(NUM_EYES > 1) eye[e].move.eyeX += 4;
+  if(eye[e].move.eyeX > (SCLERA_WIDTH - 128)) eye[e].move.eyeX = (SCLERA_WIDTH - 128);
 
   // Eyelids are rendered using a brightness threshold image.  This same
   // map can be used to simplify another problem: making the upper eyelid
   // track the pupil (eyes tend to open only as much as needed -- e.g. look
   // down and the upper eyelid drops).  Just sample a point in the upper
   // lid map slightly above the pupil to determine the rendering threshold.
-  static uint8_t uThreshold = 128;
   uint8_t        lThreshold, n;
 #ifdef TRACKING
-  int16_t sampleX = SCLERA_WIDTH  / 2 - (eyeX / 2), // Reduce X influence
-          sampleY = SCLERA_HEIGHT / 2 - (eyeY + IRIS_HEIGHT / 4);
+  int16_t sampleX = SCLERA_WIDTH  / 2 - (eye[e].move.eyeX / 2), // Reduce X influence
+          sampleY = SCLERA_HEIGHT / 2 - (eye[e].move.eyeY + IRIS_HEIGHT / 4);
   // Eyelid is slightly asymmetrical, so two readings are taken, averaged
   if(sampleY < 0) n = 0;
   else            n = (upper[sampleY][sampleX] +
                        upper[sampleY][SCREEN_WIDTH - 1 - sampleX]) / 2;
-  uThreshold = (uThreshold * 3 + n) / 4; // Filter/soften motion
+  eye[e].move.uThreshold = (eye[e].move.uThreshold * 3 + n) / 4; // Filter/soften motion
   // Lower eyelid doesn't track the same way, but seems to be pulled upward
   // by tension from the upper lid.
-  lThreshold = 254 - uThreshold;
+  lThreshold = 254 - eye[e].move.uThreshold;
 #else // No tracking -- eyelids full open unless blink modifies them
   uThreshold = lThreshold = 0;
 #endif
 
   // The upper/lower thresholds are then scaled relative to the current
   // blink position so that blinks work together with pupil tracking.
-  if(eye[eyeIndex].blink.state) { // Eye currently blinking?
-    uint32_t s = (t - eye[eyeIndex].blink.startTime);
-    if(s >= eye[eyeIndex].blink.duration) s = 255;   // At or past blink end
-    else s = 255 * s / eye[eyeIndex].blink.duration; // Mid-blink
-    s          = (eye[eyeIndex].blink.state == DEBLINK) ? 1 + s : 256 - s;
-    n          = (uThreshold * s + 254 * (257 - s)) / 256;
+  if(eye[e].blink.state) { // Eye currently blinking?
+    uint32_t s = (t - eye[e].blink.startTime);
+    if(s >= eye[e].blink.duration) s = 255;   // At or past blink end
+    else s = 255 * s / eye[e].blink.duration; // Mid-blink
+    s          = (eye[e].blink.state == DEBLINK) ? 1 + s : 256 - s;
+    n          = (eye[e].move.uThreshold * s + 254 * (257 - s)) / 256;
     lThreshold = (lThreshold * s + 254 * (257 - s)) / 256;
   } else {
-    n          = uThreshold;
+    n          = eye[e].move.uThreshold;
   }
 
   // Pass all the derived values to the eye-rendering function:
-  drawEye(eyeIndex, iScale, eyeX, eyeY, n, lThreshold);
+  drawEye(e, iScale, eye[e].move.eyeX, eye[e].move.eyeY, n, lThreshold);
+  }
 }
 
 
@@ -642,3 +600,9 @@ void loop() {
 
 #endif // LIGHT_PIN
 }
+
+
+
+
+
+
