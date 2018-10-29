@@ -1,4 +1,6 @@
-This version was forked from Adafruit's repository, and I've updated it so each connected eye will move and blink independently of one another.
+This version was forked from Adafruit's repository, and I've updated it so each connected eye will move and blink independently of one another, as well as tweaking the pin configuration for the Itsy Bitsy M0 board from Adafruit.
+
+I made these updates for this Halloween project: http://www.sudomod.com/spooky-halloween-eyes/ 
 
 # Uncanny_Eyes
 
